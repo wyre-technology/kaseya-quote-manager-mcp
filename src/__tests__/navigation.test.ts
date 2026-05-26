@@ -1,0 +1,53 @@
+import { describe, it, expect } from 'vitest';
+import { DOMAINS, getNavigationTools } from '../domains/navigation.js';
+import { getDomainHandler } from '../domains/index.js';
+
+describe('navigation', () => {
+  it('exposes navigate + status tools', () => {
+    const names = getNavigationTools().map(t => t.name);
+    expect(names).toContain('kqm_navigate');
+    expect(names).toContain('kqm_status');
+  });
+
+  it('navigate enum matches the domain list', () => {
+    const nav = getNavigationTools().find(t => t.name === 'kqm_navigate')!;
+    const enumVals = (nav.inputSchema as any).properties.domain.enum;
+    expect(enumVals.sort()).toEqual([...DOMAINS].sort());
+  });
+});
+
+describe('domain handlers', () => {
+  it('loads every domain and all tools use the kqm_ prefix', async () => {
+    for (const domain of DOMAINS) {
+      const handler = await getDomainHandler(domain);
+      const tools = handler.getTools();
+      expect(tools.length).toBeGreaterThan(0);
+      for (const tool of tools) {
+        expect(tool.name).toMatch(/^kqm_/);
+        expect(tool.description).toBeTruthy();
+        // Read-only API: no tool should be marked destructive.
+        expect((tool.annotations as any)?.destructiveHint ?? false).toBe(false);
+      }
+    }
+  });
+
+  it('every entity exposes a *_list tool', async () => {
+    const all: string[] = [];
+    for (const domain of DOMAINS) {
+      const handler = await getDomainHandler(domain);
+      all.push(...handler.getTools().map(t => t.name));
+    }
+    expect(all).toContain('kqm_quote_list');
+    expect(all).toContain('kqm_sales_order_list');
+    expect(all).toContain('kqm_purchase_order_list');
+    expect(all).toContain('kqm_product_list');
+    expect(all).toContain('kqm_customer_list');
+    // 39 entity tools total (20 lists + 19 gets; product_image has no get)
+    expect(all.length).toBe(39);
+  });
+
+  it('returns navigation help for a valid domain', async () => {
+    const handler = await getDomainHandler('sales');
+    expect(handler.getTools().some(t => t.name === 'kqm_quote_list')).toBe(true);
+  });
+});

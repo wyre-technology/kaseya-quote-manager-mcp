@@ -1,0 +1,48 @@
+{
+  "manifest_version": "0.3",
+  "name": "kaseya-quote-manager-mcp",
+  "version": "1.0.0",
+  "display_name": "Kaseya Quote Manager MCP Server",
+  "description": "MCP server for Kaseya Quote Manager (Datto Commerce) - read-only access to quotes, sales orders, purchasing, product catalog, and customers through AI assistants",
+  "long_description": "Provides AI assistants with structured, read-only access to your Kaseya Quote Manager (Datto Commerce) data. Browse quotes and quote lines, sales orders and payments, purchase orders and costs, suppliers, the product catalog, and customer records through the Model Context Protocol. Features decision-tree navigation, client-side rate limiting, and comprehensive error handling.",
+  "author": {
+    "name": "Aaron Sachs",
+    "url": "https://github.com/asachs01"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wyre-technology/kaseya-quote-manager-mcp"
+  },
+  "homepage": "https://github.com/wyre-technology/kaseya-quote-manager-mcp",
+  "license": "Apache-2.0",
+  "keywords": ["kaseya", "quote-manager", "datto-commerce", "msp", "quoting", "sales"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "KASEYA_QUOTE_MANAGER_API_KEY": "${user_config.kqm_api_key}",
+        "MCP_TRANSPORT": "stdio"
+      }
+    }
+  },
+  "tools_generated": true,
+  "user_config": {
+    "kqm_api_key": {
+      "type": "string",
+      "title": "Kaseya Quote Manager API Key",
+      "description": "Your Kaseya Quote Manager API key (Settings → API). Sent in the apiKey header.",
+      "required": true,
+      "sensitive": true
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=18.0.0"
+    },
+    "claude_desktop": ">=0.10.0"
+  }
+}
