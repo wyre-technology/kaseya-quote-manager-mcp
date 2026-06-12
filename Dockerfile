@@ -43,6 +43,10 @@ COPY --from=builder /app/package.json ./
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 
+# Remove the bundled npm CLI from the production image; the runtime only needs
+# node, and npm's bundled dependencies trigger Trivy base-image CVE alerts.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+
 # Create logs directory
 RUN mkdir -p /app/logs && chown -R kaseya-quote-manager:kaseya-quote-manager /app
 
