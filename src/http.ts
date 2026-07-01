@@ -1,7 +1,7 @@
 import { createServer as createHttpServer } from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createServer } from './server.js';
-import { getCredentials, resetClient } from './utils/client.js';
+import { getCredentials, runWithCredentials } from './utils/client.js';
 import { logger } from './utils/logger.js';
 
 function startHttpServer(): void {
@@ -41,29 +41,46 @@ function startHttpServer(): void {
       return;
     }
 
-    if (isGatewayMode) {
-      const apiKey = req.headers['x-kaseya-quote-manager-api-key'] as string;
-      if (apiKey) {
-        resetClient();
-        process.env.KASEYA_QUOTE_MANAGER_API_KEY = apiKey;
-      }
-      // Don't reject — tools/list works without credentials
+    // Gateway mode injects per-request tenant credentials via headers. Read them
+    // into a request-local variable — NEVER back into process.env — so
+    // concurrent tenants can't clobber a shared slot across await points.
+    // Don't reject when absent: tools/list works without credentials; only
+    // tools/call requires them.
+    const apiKey = isGatewayMode
+      ? (req.headers['x-kaseya-quote-manager-api-key'] as string | undefined)
+      : undefined;
+
+    const handle = async () => {
+      // SECURITY-CRITICAL: this transport MUST stay stateless (sessionIdGenerator:
+      // undefined + enableJsonResponse: true). Per-request tenant credentials are
+      // carried in the AsyncLocalStorage context opened by runWithCredentials()
+      // below, and a stateless request->single-response flow keeps the tool call
+      // inside that context. A stateful/SSE transport (persistent stream) would let
+      // a long-lived connection serve later messages under a stale/foreign
+      // credential context — re-review tenant isolation before changing this.
+      const server = createServer();
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true,
+      });
+
+      res.on('close', () => {
+        transport.close();
+        server.close();
+      });
+
+      await server.connect(transport);
+      await transport.handleRequest(req, res);
+    };
+
+    // Scope gateway credentials to this request with AsyncLocalStorage so
+    // concurrent tenants never share a credential slot. In stdio/standalone
+    // mode (or a tools/list probe with no header) fall through to process.env.
+    if (apiKey) {
+      await runWithCredentials({ apiKey }, handle);
+    } else {
+      await handle();
     }
-
-    // Create fresh server + transport per request (stateless)
-    const server = createServer();
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
-    });
-
-    res.on('close', () => {
-      transport.close();
-      server.close();
-    });
-
-    await server.connect(transport);
-    await transport.handleRequest(req, res);
   });
 
   httpServer.listen(port, host, () => {
