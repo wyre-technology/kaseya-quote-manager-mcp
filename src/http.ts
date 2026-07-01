@@ -1,7 +1,7 @@
 import { createServer as createHttpServer } from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createServer } from './server.js';
-import { getCredentials, resetClient } from './utils/client.js';
+import { getCredentials, runWithCredentials } from './utils/client.js';
 import { logger } from './utils/logger.js';
 
 function startHttpServer(): void {
@@ -41,29 +41,32 @@ function startHttpServer(): void {
       return;
     }
 
-    if (isGatewayMode) {
-      const apiKey = req.headers['x-kaseya-quote-manager-api-key'] as string;
-      if (apiKey) {
-        resetClient();
-        process.env.KASEYA_QUOTE_MANAGER_API_KEY = apiKey;
-      }
-      // Don't reject — tools/list works without credentials
+    const apiKey = isGatewayMode ? (req.headers['x-kaseya-quote-manager-api-key'] as string | undefined) : undefined;
+
+    const handle = async () => {
+      const server = createServer();
+      // SECURITY-CRITICAL invariant: this transport MUST stay stateless
+      // (sessionIdGenerator: undefined + enableJsonResponse: true). Per-request
+      // tenant credentials are carried in an AsyncLocalStorage context opened by
+      // runWithCredentials() below. A stateless request->single-response flow
+      // keeps the tool call inside that context. Switching to a stateful/SSE
+      // transport (sessionIdGenerator set, persistent stream) would let a
+      // long-lived connection serve later messages under a stale/foreign
+      // credential context — re-review tenant isolation before changing this.
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true,
+      });
+      res.on('close', () => { transport.close(); server.close(); });
+      await server.connect(transport);
+      await transport.handleRequest(req, res);
+    };
+
+    if (apiKey) {
+      await runWithCredentials({ apiKey }, handle);
+    } else {
+      await handle();
     }
-
-    // Create fresh server + transport per request (stateless)
-    const server = createServer();
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
-    });
-
-    res.on('close', () => {
-      transport.close();
-      server.close();
-    });
-
-    await server.connect(transport);
-    await transport.handleRequest(req, res);
   });
 
   httpServer.listen(port, host, () => {

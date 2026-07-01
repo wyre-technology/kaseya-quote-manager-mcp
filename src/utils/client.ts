@@ -1,42 +1,32 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { KaseyaQuoteManagerClient } from '@wyre-technology/node-kaseya-quote-manager';
-import { logger } from './logger.js';
 
-let _client: KaseyaQuoteManagerClient | null = null;
-let _credKey: string | null = null;
+export interface Credentials { apiKey: string; }
 
-interface Credentials {
-  apiKey: string;
+// Request-scoped credential store. In gateway mode the HTTP layer runs each
+// request inside runWithCredentials({apiKey}); getCredentials() reads it.
+// Falls back to process.env for stdio/single-tenant mode.
+const credStore = new AsyncLocalStorage<Credentials>();
+
+export function runWithCredentials<T>(creds: Credentials, fn: () => T): T {
+  return credStore.run(creds, fn);
 }
 
 export function getCredentials(): Credentials | null {
+  const scoped = credStore.getStore();
+  if (scoped?.apiKey) return scoped;
   const apiKey = process.env.KASEYA_QUOTE_MANAGER_API_KEY;
-  if (!apiKey) {
-    logger.warn('Missing credentials', { hasApiKey: false });
-    return null;
-  }
+  if (!apiKey) return null;
   return { apiKey };
 }
 
-export async function getClient(): Promise<KaseyaQuoteManagerClient> {
+// Constructs a client from the request-scoped (or env) credentials. The client
+// is cheap and holds no shared mutable state, so we build one per call — never
+// a process-global singleton.
+export function getClient(): KaseyaQuoteManagerClient {
   const creds = getCredentials();
   if (!creds) {
-    throw new Error('No Kaseya Quote Manager API credentials configured. Set KASEYA_QUOTE_MANAGER_API_KEY.');
+    throw new Error('No Kaseya Quote Manager credentials configured. Set KASEYA_QUOTE_MANAGER_API_KEY.');
   }
-
-  // Invalidate the cached client if the gateway injected a different key.
-  if (_client && _credKey !== creds.apiKey) {
-    _client = null;
-  }
-
-  if (!_client) {
-    _client = new KaseyaQuoteManagerClient(creds);
-    _credKey = creds.apiKey;
-    logger.info('Created Kaseya Quote Manager API client');
-  }
-  return _client;
-}
-
-export function resetClient(): void {
-  _client = null;
-  _credKey = null;
+  return new KaseyaQuoteManagerClient({ apiKey: creds.apiKey });
 }
